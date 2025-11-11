@@ -1,3 +1,5 @@
+THIS IS AN UNTESTED/UNBUILT EXPERIMENTAL/CONCEPTUAL program 
+
 # stitchbot
 dag stability 
 
