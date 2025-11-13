@@ -3,8 +3,8 @@ use secp256k1::{SecretKey, PublicKey, Message, ecdsa::Signature};
 use bincode::{serialize, deserialize};
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use chrono::Utc;
+use blake2s_simd::Params;
 
 const STITCH_MSG_ID: u8 = 0xF0;
 
@@ -35,7 +35,8 @@ impl StitchRequest {
 
     fn hash(&self) -> Message {
         let data = serialize(&(&self.weak_block, &self.tip_hashes, self.reward_sompi, self.expiry)).unwrap();
-        Message::from_slice(&blake2s_simd::hash(&data).as_bytes()).unwrap()
+        let hash = Params::new().hash_length(32).hash(&data);
+        Message::from_slice(hash.as_bytes()).unwrap()
     }
 
     fn sign(&self, sk: &SecretKey) -> Vec<u8> {
@@ -44,8 +45,8 @@ impl StitchRequest {
     }
 
     pub fn verify(&self) -> bool {
-        let pubkey = PublicKey::from_slice(&self.pubkey).ok()?;
-        let sig = Signature::from_compact(&self.signature).ok()?;
+        let Ok(pubkey) = PublicKey::from_slice(&self.pubkey) else { return false };
+        let Ok(sig) = Signature::from_compact(&self.signature) else { return false };
         let msg = self.hash();
         pubkey.verify(&msg, &sig).is_ok()
     }
@@ -66,7 +67,7 @@ pub async fn broadcast_stitch(
 }
 
 pub async fn setup_p2p(cfg: &super::config::Config) -> Result<Adaptor> {
-    let initializer = Arc::new(StitchInitializer::new());
+    let initializer = Arc::new(StitchInitializer);
     let mut adaptor = Adaptor::new(initializer);
     for peer in &cfg.p2p_bootstrap_peers {
         adaptor.connect(peer).await?;
@@ -75,10 +76,6 @@ pub async fn setup_p2p(cfg: &super::config::Config) -> Result<Adaptor> {
 }
 
 struct StitchInitializer;
-
-impl StitchInitializer {
-    fn new() -> Self { Self }
-}
 
 impl ConnectionInitializer for StitchInitializer {
     fn initialize(&self, peer: Arc<Peer>) -> Result<Router, ProtocolError> {
@@ -98,8 +95,7 @@ impl Flow for StitchFlow {
                 if msg.id == STITCH_MSG_ID {
                     if let Ok(req) = deserialize::<StitchRequest>(&msg.payload) {
                         if req.verify() && req.expiry > Utc::now().timestamp() as u64 {
-                            log::info!("Valid stitch request: {}", req.weak_block);
-                            // Miner: add parents to block template
+                            log::info!("Valid stitch request: {} tips, reward: {}", req.tip_hashes.len(), req.reward_sompi);
                         }
                     }
                 }
