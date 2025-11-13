@@ -2,15 +2,13 @@ use keyring::Entry;
 use zeroize::Zeroize;
 use kaspa_wallet_core::{wallet::Wallet, storage::InMemoryStorage};
 use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 const SERVICE: &str = "stitchbot";
 const USER: &str = "kaspa-stitcher";
 
 pub async fn load_or_create_wallet(rpc_url: &str) -> Result<Wallet<InMemoryStorage>> {
     let entry = Entry::new(SERVICE, USER)?;
-    let storage = Arc::new(Mutex::new(InMemoryStorage::new()));
+    let storage = std::sync::Arc::new(tokio::sync::Mutex::new(InMemoryStorage::new()));
 
     let seed = match entry.get_password() {
         Ok(pass) => hex::decode(pass)?,
