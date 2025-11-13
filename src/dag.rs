@@ -1,7 +1,6 @@
 use petgraph::{Graph, Directed, graph::NodeIndex};
 use kaspa_consensus_core::block::Block;
 use std::collections::{HashMap, VecDeque};
-use anyhow::Result;
 
 pub type Dag = Graph<BlockInfo, (), Directed>;
 
@@ -14,8 +13,8 @@ pub struct BlockInfo {
 }
 
 pub struct RollingDag {
-    graph: Dag,
-    idx: HashMap<String, NodeIndex>,
+    pub graph: Dag,
+    pub idx: HashMap<String, NodeIndex>,
     order: VecDeque<String>,
     capacity: usize,
 }
@@ -39,7 +38,6 @@ impl RollingDag {
         };
         let hash = info.hash.clone();
 
-        // Evict oldest
         if self.order.len() >= self.capacity {
             if let Some(old_hash) = self.order.pop_front() {
                 if let Some(&node) = self.idx.get(&old_hash) {
@@ -59,6 +57,36 @@ impl RollingDag {
             }
         }
         true
+    }
+
+    pub fn is_in_selected_chain(&self, block: &Block) -> bool {
+        let hash = block.hash().to_string();
+        let Some(&node_idx) = self.idx.get(&hash) else { return false };
+
+        let mut current = node_idx;
+        let mut max_blue = self.graph[node_idx].blue_score;
+        let mut selected = node_idx;
+
+        while let Some(parent) = self.graph.neighbors_directed(current, petgraph::Direction::Incoming).next() {
+            let p_blue = self.graph[parent].blue_score;
+            if p_blue > max_blue {
+                max_blue = p_blue;
+                selected = parent;
+            }
+            current = parent;
+        }
+
+        let mut current = selected;
+        while let Some(child) = self.graph.neighbors_directed(current, petgraph::Direction::Outgoing)
+            .max_by_key(|&c| self.graph[c].blue_score)
+        {
+            if child == node_idx {
+                return true;
+            }
+            current = child;
+        }
+
+        false
     }
 
     pub fn find_fracture(&self, min_delta: u64) -> Option<(NodeIndex, Vec<NodeIndex>)> {
