@@ -1,8 +1,10 @@
-use petgraph::{Graph, Directed, graph::NodeIndex};
+use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::Directed;
+use graphrs::algorithms::centrality::betweenness::betweenness_centrality;  // ← Correct import from graphrs
 use kaspa_consensus_core::block::Block;
 use std::collections::{HashMap, VecDeque};
 
-pub type Dag = Graph<BlockInfo, (), Directed>;
+pub type Dag = DiGraph<BlockInfo, (), Directed>;
 
 #[derive(Clone, Debug)]
 pub struct BlockInfo {
@@ -22,7 +24,7 @@ pub struct RollingDag {
 impl RollingDag {
     pub fn new(capacity: usize) -> Self {
         Self {
-            graph: Graph::new(),
+            graph: DiGraph::new(),
             idx: HashMap::new(),
             order: VecDeque::with_capacity(capacity),
             capacity,
@@ -38,6 +40,7 @@ impl RollingDag {
         };
         let hash = info.hash.clone();
 
+        // Prune old blocks if over capacity
         if self.order.len() >= self.capacity {
             if let Some(old_hash) = self.order.pop_front() {
                 if let Some(&node) = self.idx.get(&old_hash) {
@@ -51,18 +54,22 @@ impl RollingDag {
         self.idx.insert(hash.clone(), node);
         self.order.push_back(hash);
 
+        // Add edges from parents
         for parent in &info.parents {
             if let Some(&p_node) = self.idx.get(parent) {
                 self.graph.add_edge(p_node, node, ());
             }
         }
+
         true
     }
 
+    /// Checks if a block is on the selected (blue) chain
     pub fn is_in_selected_chain(&self, block: &Block) -> bool {
         let hash = block.hash().to_string();
         let Some(&node_idx) = self.idx.get(&hash) else { return false };
 
+        // Walk up to find highest blue score ancestor
         let mut current = node_idx;
         let mut max_blue = self.graph[node_idx].blue_score;
         let mut selected = node_idx;
@@ -76,42 +83,65 @@ impl RollingDag {
             current = parent;
         }
 
+        // Walk down from selected ancestor along max-blue children
         let mut current = selected;
-        while let Some(child) = self.graph.neighbors_directed(current, petgraph::Direction::Outgoing)
-            .max_by_key(|&c| self.graph[c].blue_score)
-        {
-            if child == node_idx {
+        loop {
+            if current == node_idx {
                 return true;
             }
-            current = child;
-        }
+            let next = self.graph
+                .neighbors_directed(current, petgraph::Direction::Outgoing)
+                .max_by_key(|&c| self.graph[c].blue_score);
 
-        false
+            match next {
+                Some(n) => current = n,
+                None => return false,
+            }
+        }
     }
 
+    /// Find the best fracture to stitch: high betweenness + large blue delta
     pub fn find_fracture(&self, min_delta: u64) -> Option<(NodeIndex, Vec<NodeIndex>)> {
-        use petgraph::algo::betweenness_centrality;
-        let betweenness = betweenness_centrality(&self.graph);
-        let mut candidates = vec![];
+        if self.graph.node_count() < 10 {
+            return None;
+        }
+
+        // Compute betweenness centrality (O(V^3) but fine for 10k nodes)
+        let betweenness = betweenness_centrality(&self.graph, false, true);  // normalized=False, parallel=True
+
+        let mut candidates = Vec::new();
 
         for node in self.graph.node_indices() {
             let children: Vec<_> = self.graph.neighbors_directed(node, petgraph::Direction::Outgoing).collect();
-            if children.len() < 2 { continue; }
+            if children.len() < 2 {
+                continue;
+            }
 
             let info = &self.graph[node];
-            let mut delta = u64::MAX;
+            let mut max_child_blue = 0;
             for &child in &children {
-                let child_score = self.graph[child].blue_score;
-                delta = delta.min(child_score.max(info.blue_score) - child_score.min(info.blue_score));
+                let child_blue = self.graph[child].blue_score;
+                if child_blue > max_child_blue {
+                    max_child_blue = child_blue;
+                }
             }
-            if delta < min_delta { continue; }
 
-            candidates.push((node, betweenness[node.index()], delta));
+            let delta = max_child_blue.saturating_sub(info.blue_score);
+            if delta < min_delta {
+                continue;
+            }
+
+            let centrality = betweenness[node.index()];
+            candidates.push((node, centrality, delta, children));
         }
 
-        candidates.sort_by_key(|&(i, bet, delta)| std::cmp::Reverse((bet * 1_000_000f64 + 1.0 / (delta as f64 + 1.0)) as u64));
-        let best = candidates.first()?;
-        let tips: Vec<_> = self.graph.neighbors_directed(best.0, petgraph::Direction::Outgoing).collect();
-        Some((best.0, tips))
+        // Sort by betweenness (high) + delta (low) = most critical fracture first
+        candidates.sort_by_key(|&(_, centrality, delta, _)| {
+            std::cmp::Reverse(
+                ((centrality * 1_000_000.0) + (1_000_000.0 / (delta as f64 + 1.0))) as u64
+            )
+        });
+
+        candidates.into_iter().next().map(|(node, _, _, tips)| (node, tips))
     }
 }
