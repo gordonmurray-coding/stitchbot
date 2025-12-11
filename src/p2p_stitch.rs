@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use bincode::{deserialize, serialize};
 use blake2s_simd::Params;
 use chrono::Utc;
-use secp256k1::{ecdsa::Signature, Message, PublicKey, SecretKey};
+use secp256k1::{ecdsa::Signature, PublicKey, SecretKey};
 use std::{future::Future, pin::Pin, sync::Arc};
-
+use secp256k1::Message;
 use serde::{Deserialize, Serialize};
 
 use kaspa_p2p_flows::{flow_context::FlowContext, flow_trait::Flow};
