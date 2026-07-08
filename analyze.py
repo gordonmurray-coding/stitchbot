@@ -139,6 +139,21 @@ def main():
     print(f"  fractured {100*len(fr)/len(rows):.1f}% of samples · {episodes} episodes · "
           f"longest {hms(maxdur)}")
 
+    # --- merge latency: the "every block merged after log rounds" conjecture ---
+    lat_mean = [r.get("merge_lat_mean", 0.0) for r in rows]
+    lat_max = [r.get("merge_lat_max", 0) for r in rows]
+    if any(lat_max):
+        print("\nMERGE LATENCY  (blue-score rounds a block waits to be merged — the conjecture test)")
+        print(f"  overall mean {mean(lat_mean):.1f} · worst single block {max(lat_max)} rounds")
+        print("  by tip width (does lag grow once tips exceed the cap?):")
+        for lo, hi in [(0, cap), (cap + 1, 999)]:
+            idx = [i for i, t in enumerate(tips) if lo <= t <= hi]
+            if idx:
+                label = f"{lo}–{hi if hi < 999 else '∞'} tips"
+                lm = mean([lat_mean[i] for i in idx])
+                lx = max(lat_max[i] for i in idx)
+                print(f"    {label:<14} mean-lag {lm:>6.1f}  worst {lx:>5}  (n={len(idx)})")
+
     # --- verdict ---
     print("\n" + "═" * W)
     over_red = [red[i] for i, e in enumerate(excess) if e > 0]

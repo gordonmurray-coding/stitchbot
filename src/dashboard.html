@@ -99,7 +99,7 @@
     <div class="card"><div class="lab">Tip excess</div><div class="val num" id="tx">—</div><div class="sub">over merge cap</div></div>
     <div class="card"><div class="lab">Merge cap</div><div class="val num" id="mp">—</div><div class="sub">max parents seen</div></div>
     <div class="card"><div class="lab">Blocks / sec</div><div class="val num" id="bps">—</div><div class="sub" id="bc"></div></div>
-    <div class="card"><div class="lab">Blue Δ · tips</div><div class="val num" id="bd">—</div><div class="sub" id="brange"></div></div>
+    <div class="card"><div class="lab">Merge lag</div><div class="val num" id="mlag">—</div><div class="sub" id="mlagsub">rounds · p95 —</div></div>
     <div class="card"><div class="lab">Fracture</div><div class="val num" id="fdur">—</div><div class="sub" id="fsub">events —</div></div>
   </div>
 
@@ -117,19 +117,22 @@
     </div>
     <aside>
       <div class="sec"><h3>Tip width · last 2 min</h3><canvas class="spark" id="sparkTip"></canvas></div>
+      <div class="sec"><h3>Merge lag · mean rounds</h3><canvas class="spark" id="sparkLat"></canvas></div>
       <div class="sec"><h3>Orphan rate % · last 2 min</h3><canvas class="spark" id="sparkRed"></canvas></div>
       <div class="sec"><h3>Block rate · last 2 min</h3><canvas class="spark" id="sparkBps"></canvas></div>
       <div class="sec"><h3>Ledger</h3>
         <div class="rows">
           <div class="row"><span class="k">peak tip width</span><span class="v" id="r_peak">—</span></div>
+          <div class="row"><span class="k">merge lag · mean</span><span class="v" id="r_mlmean">—</span></div>
           <div class="row"><span class="k">max fracture</span><span class="v" id="r_maxf">—</span></div>
+          <div class="row"><span class="k">blue Δ · tips</span><span class="v" id="r_bd">—</span></div>
           <div class="row"><span class="k">reds / blues · win</span><span class="v" id="r_rb">—</span></div>
           <div class="row"><span class="k">fracture events</span><span class="v" id="r_fe">—</span></div>
           <div class="row"><span class="k">virtual DAA</span><span class="v" id="r_daa">—</span></div>
           <div class="row"><span class="k">difficulty</span><span class="v" id="r_diff">—</span></div>
           <div class="row"><span class="k">stress Φ · peak</span><span class="v" id="r_stress">—</span></div>
           <div class="row"><span class="k">block / header</span><span class="v" id="r_bh">—</span></div>
-          <div class="row"><span class="k">nodes in view</span><span class="v" id="r_win">—</span></div>
+          <div class="row"><span class="k">nodes · shown/win</span><span class="v" id="r_win">—</span></div>
         </div>
       </div>
     </aside>
@@ -247,18 +250,22 @@
     $("mp").textContent=d.max_parents;
 
     $("bps").textContent=fmt(d.bps,2); $("bc").textContent=fmt(d.block_count)+" blocks";
-    $("bd").textContent=fmt(d.blue_delta); $("brange").textContent=fmt(d.blue_min)+" – "+fmt(d.blue_max);
+    var ml=d.merge_lat_max||0, mls=state(ml,30,80);
+    var mlv=$("mlag"); mlv.textContent=fmt(ml); mlv.className="val num "+mls;
+    $("mlagsub").textContent="rounds · p95 "+fmt(d.merge_lat_p95,0)+" · mean "+fmt(d.merge_lat_mean,1);
 
     var fv=$("fdur"); fv.textContent=d.fracture?fmt(d.fracture_secs,0)+"s":"—";
     fv.className="val num "+(d.fracture?"crit":"ok"); $("fsub").textContent="events "+fmt(d.fracture_events);
 
     $("r_peak").textContent=fmt(d.peak_tip_width); $("r_maxf").textContent=fmt(d.max_fracture_secs,0)+"s";
+    $("r_mlmean").textContent=fmt(d.merge_lat_mean,1)+" rounds";
+    $("r_bd").textContent=fmt(d.blue_delta);
     $("r_rb").textContent=fmt(d.reds_window)+" / "+fmt(d.blues_window);
     $("r_fe").textContent=fmt(d.fracture_events);
     $("r_daa").textContent=fmt(d.virtual_daa); $("r_diff").textContent=fmt(d.difficulty,0);
     $("r_stress").textContent=fmt(d.stress,1)+" ("+fmt(d.stress_peak,0)+")";
     $("r_bh").textContent=fmt(d.block_count)+" / "+fmt(d.header_count);
-    $("r_win").textContent=d.window;
+    $("r_win").textContent=fmt(d.viz_shown)+" / "+fmt(d.window);
 
     var ban=$("banner");
     if(d.fracture){ ban.className="show";
@@ -266,6 +273,7 @@
     else ban.className="";
 
     spark("sparkTip",d.tip_history,"#49eacb","rgba(73,234,203,0.12)");
+    spark("sparkLat",d.lat_history,"#c9a24a","rgba(201,162,74,0.12)");
     spark("sparkRed",d.red_history,"#ff8a6a","rgba(255,138,106,0.12)");
     spark("sparkBps",d.bps_history,"#7aa2d8","rgba(122,162,216,0.12)");
   }

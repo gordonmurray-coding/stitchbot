@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     let client = GrpcClient::connect(url.clone()).await.map_err(|e| anyhow!("connect {url}: {e}"))?;
     log::info!("connected — polling every {} ms; dashboard on :{}", cfg.poll_ms, cfg.http_port);
 
-    let mut eng = Engine::new(cfg.dag_window);
+    let mut eng = Engine::new(cfg.dag_window, cfg.viz_cap);
     let mut low_hash: Option<RpcHash> = None;
     let mut last_count: Option<(u64, f64)> = None; // (block_count, unix_secs)
 
@@ -67,6 +67,7 @@ fn log_metrics(path: &str, s: &Snapshot) {
         "t": s.updated_ms, "net": s.network, "tips": s.tip_width, "peak_tips": s.peak_tip_width,
         "bps": s.bps, "blue_delta": s.blue_delta, "max_parents": s.max_parents, "avg_parents": s.avg_parents,
         "tip_excess": s.tip_excess, "red_rate": s.red_rate, "reds": s.reds_window, "blues": s.blues_window,
+        "merge_lat_mean": s.merge_lat_mean, "merge_lat_p95": s.merge_lat_p95, "merge_lat_max": s.merge_lat_max,
         "fracture": s.fracture, "fracture_secs": s.fracture_secs, "daa": s.virtual_daa, "blocks": s.block_count,
     });
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
@@ -97,16 +98,28 @@ async fn poll_once(
             .map(|h| h.to_string())
             .collect();
         let vd = b.verbose_data.as_ref();
-        eng.ingest(BlockNode {
-            hash: b.header.hash.to_string(),
-            blue_score: b.header.blue_score,
-            daa: b.header.daa_score,
-            timestamp: b.header.timestamp,
-            parents,
-            is_chain: vd.map(|v| v.is_chain_block).unwrap_or(false),
-            blues: vd.map(|v| v.merge_set_blues_hashes.len() as u32).unwrap_or(0),
-            reds: vd.map(|v| v.merge_set_reds_hashes.len() as u32).unwrap_or(0),
-        });
+        let merged: Vec<String> = vd
+            .map(|v| {
+                v.merge_set_blues_hashes
+                    .iter()
+                    .chain(v.merge_set_reds_hashes.iter())
+                    .map(|h| h.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        eng.ingest(
+            BlockNode {
+                hash: b.header.hash.to_string(),
+                blue_score: b.header.blue_score,
+                daa: b.header.daa_score,
+                timestamp: b.header.timestamp,
+                parents,
+                is_chain: vd.map(|v| v.is_chain_block).unwrap_or(false),
+                blues: vd.map(|v| v.merge_set_blues_hashes.len() as u32).unwrap_or(0),
+                reds: vd.map(|v| v.merge_set_reds_hashes.len() as u32).unwrap_or(0),
+            },
+            &merged,
+        );
     }
     *low_hash = Some(info.sink);
 

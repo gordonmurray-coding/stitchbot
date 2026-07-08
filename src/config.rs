@@ -12,9 +12,12 @@ pub struct Config {
     /// How often to poll the node, milliseconds.
     #[serde(default = "default_poll_ms")]
     pub poll_ms: u64,
-    /// Number of recent blocks kept in the rolling DAG (for metrics + the viz).
+    /// Number of recent blocks kept in the rolling DAG for metrics (bump for high BPS).
     #[serde(default = "default_window")]
     pub dag_window: usize,
+    /// Max nodes sent to the dashboard canvas (kept small so the browser stays smooth at 100 BPS).
+    #[serde(default = "default_viz_cap")]
+    pub viz_cap: usize,
     /// Tip-width above this flags a fracture in the UI.
     #[serde(default = "default_fracture_tips")]
     pub fracture_tip_width: usize,
@@ -30,7 +33,8 @@ fn default_log_path() -> String { "stitchbot_metrics.jsonl".to_string() }
 
 fn default_http_port() -> u16 { 8899 }
 fn default_poll_ms() -> u64 { 1000 }
-fn default_window() -> usize { 240 }
+fn default_window() -> usize { 1500 }
+fn default_viz_cap() -> usize { 600 }
 fn default_fracture_tips() -> usize { 8 }
 fn default_min_delta() -> u64 { 500 }
 

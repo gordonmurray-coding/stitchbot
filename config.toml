@@ -4,9 +4,13 @@ rpc_url = "192.168.4.33:16110"
 # Dashboard + JSON API port (open http://<host>:8899/).
 http_port = 8899
 
-# Poll cadence (ms) and rolling-DAG window (recent blocks kept for metrics + the viz).
+# Poll cadence (ms) and rolling-DAG window (recent blocks kept for metrics).
+# At 100 BPS a block arrives every ~10 ms, so bump dag_window (e.g. 5000) for a meaningful window.
 poll_ms = 1000
-dag_window = 240
+dag_window = 1500
+
+# Max blocks drawn on the dashboard canvas (metric window can be far larger; this keeps the UI smooth).
+viz_cap = 600
 
 # Fracture flags: tip width at/above this, OR blue-score spread across tips at/above this.
 # (On a ~10 BPS DAG a few tips is normal; tune per network.)
