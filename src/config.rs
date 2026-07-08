@@ -27,7 +27,18 @@ pub struct Config {
     /// File the JSONL metrics dataset is appended to (the measurement PoC output).
     #[serde(default = "default_log_path")]
     pub log_path: String,
+    /// Merge-depth ceiling in blue-score rounds (= target_bps × 3600). Blocks not merged within this
+    /// are permanently orphaned. 36000 at 10 BPS mainnet; 360000 at 100 BPS.
+    #[serde(default = "default_merge_depth")]
+    pub merge_depth: u64,
+    /// Blue-score depth used by the confirmation-time proxy (rounds below the DAG frontier to count a
+    /// block "confirmed"). Not the protocol's finality — a tunable security proxy for the correlation.
+    #[serde(default = "default_conf_depth")]
+    pub conf_depth: u64,
 }
+
+fn default_merge_depth() -> u64 { 36_000 }
+fn default_conf_depth() -> u64 { 120 }
 
 fn default_log_path() -> String { "stitchbot_metrics.jsonl".to_string() }
 

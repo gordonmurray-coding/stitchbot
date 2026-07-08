@@ -19,3 +19,11 @@ base_min_delta = 500
 
 # Measurement dataset — one JSONL record per poll (tip width, red rate, tip excess, fracture, …).
 log_path = "stitchbot_metrics.jsonl"
+
+# Merge-depth ceiling in blue rounds (= target_bps × 3600). Blocks not merged within this are
+# permanently orphaned. 36000 at 10 BPS; set 360000 at 100 BPS.
+merge_depth = 36000
+
+# Confirmation-time proxy depth (blue rounds below the frontier to count a block "confirmed").
+# A tunable security proxy — NOT the protocol's finality (finality_depth = target_bps × 43200).
+conf_depth = 120

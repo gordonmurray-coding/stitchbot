@@ -154,6 +154,33 @@ def main():
                 lx = max(lat_max[i] for i in idx)
                 print(f"    {label:<14} mean-lag {lm:>6.1f}  worst {lx:>5}  (n={len(idx)})")
 
+    # --- merge-depth headroom: distance to the permanent-orphan cliff ---
+    md = max((r.get("merge_depth", 0) for r in rows), default=0)
+    dpu = [r.get("depth_used_pct", 0.0) for r in rows]
+    if md and any(dpu):
+        worst = max(dpu)
+        verdict = ("ample headroom" if worst < 20 else
+                   "WATCH — approaching the cliff" if worst < 70 else
+                   "CRITICAL — near the permanent-orphan cliff")
+        print(f"\nMERGE-DEPTH HEADROOM  (cliff = {md} rounds; blocks past it are orphaned forever)")
+        print(f"  worst merge used {worst:.3f}% of the budget · mean {mean(dpu):.3f}%  → {verdict}")
+
+    # --- confirmation time vs merge lag (the correlation you asked about) ---
+    have = [r for r in rows if r.get("conf_samples", 0) >= 3]
+    if have:
+        latest = have[-1]
+        ct = [r["conf_time_mean"] for r in rows if r.get("conf_samples", 0) > 0]
+        # only average correlations once enough blocks have confirmed (early small-n values are noisy)
+        well = [r for r in have if r.get("conf_samples", 0) >= 50] or have
+        cc = [r["conf_corr"] for r in well]
+        r = latest.get("conf_corr", 0.0)
+        interp = ("no link — merge lag is negligible vs the confirmation depth" if abs(r) < 0.2 else
+                  "merge lag feeds through into confirmation time" if r > 0.4 else "weak/uncertain link")
+        print("\nCONFIRMATION TIME vs MERGE LAG  (proxy: rounds-to-D below the frontier)")
+        print(f"  confirmation time: mean {mean(ct):.2f}s")
+        print(f"  corr(merge_lag, conf_time): {r:+.2f} (n={latest.get('conf_samples',0)}) "
+              f"· run-mean {mean(cc):+.2f}  → {interp}")
+
     # --- verdict ---
     print("\n" + "═" * W)
     over_red = [red[i] for i, e in enumerate(excess) if e > 0]

@@ -68,6 +68,8 @@ fn log_metrics(path: &str, s: &Snapshot) {
         "bps": s.bps, "blue_delta": s.blue_delta, "max_parents": s.max_parents, "avg_parents": s.avg_parents,
         "tip_excess": s.tip_excess, "red_rate": s.red_rate, "reds": s.reds_window, "blues": s.blues_window,
         "merge_lat_mean": s.merge_lat_mean, "merge_lat_p95": s.merge_lat_p95, "merge_lat_max": s.merge_lat_max,
+        "merge_depth": s.merge_depth, "depth_used_pct": s.depth_used_pct,
+        "conf_time_mean": s.conf_time_mean, "conf_time_p95": s.conf_time_p95, "conf_corr": s.conf_corr, "conf_samples": s.conf_samples,
         "fracture": s.fracture, "fracture_secs": s.fracture_secs, "daa": s.virtual_daa, "blocks": s.block_count,
     });
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
@@ -143,5 +145,7 @@ async fn poll_once(
         &tips,
         cfg.fracture_tip_width,
         cfg.base_min_delta,
+        cfg.merge_depth,
+        cfg.conf_depth,
     ))
 }

@@ -97,7 +97,7 @@
       <span class="pill ok" id="twpill">healthy</span></div>
     <div class="card"><div class="lab">Orphan rate</div><div class="val num" id="red">—</div><div class="sub">reds / merged</div></div>
     <div class="card"><div class="lab">Tip excess</div><div class="val num" id="tx">—</div><div class="sub">over merge cap</div></div>
-    <div class="card"><div class="lab">Merge cap</div><div class="val num" id="mp">—</div><div class="sub">max parents seen</div></div>
+    <div class="card"><div class="lab">Depth used</div><div class="val num" id="dpu">—</div><div class="sub" id="dpusub">of merge-depth cliff</div></div>
     <div class="card"><div class="lab">Blocks / sec</div><div class="val num" id="bps">—</div><div class="sub" id="bc"></div></div>
     <div class="card"><div class="lab">Merge lag</div><div class="val num" id="mlag">—</div><div class="sub" id="mlagsub">rounds · p95 —</div></div>
     <div class="card"><div class="lab">Fracture</div><div class="val num" id="fdur">—</div><div class="sub" id="fsub">events —</div></div>
@@ -120,6 +120,14 @@
       <div class="sec"><h3>Merge lag · mean rounds</h3><canvas class="spark" id="sparkLat"></canvas></div>
       <div class="sec"><h3>Orphan rate % · last 2 min</h3><canvas class="spark" id="sparkRed"></canvas></div>
       <div class="sec"><h3>Block rate · last 2 min</h3><canvas class="spark" id="sparkBps"></canvas></div>
+      <div class="sec"><h3>Merge depth &amp; confirmation</h3>
+        <div class="rows">
+          <div class="row"><span class="k">merge cap · parents</span><span class="v" id="r_mp">—</span></div>
+          <div class="row"><span class="k">merge-depth cliff</span><span class="v" id="r_mdepth">—</span></div>
+          <div class="row"><span class="k">conf time · mean</span><span class="v" id="r_conf">—</span></div>
+          <div class="row"><span class="k">conf ↔ lag corr</span><span class="v" id="r_corr">—</span></div>
+        </div>
+      </div>
       <div class="sec"><h3>Ledger</h3>
         <div class="rows">
           <div class="row"><span class="k">peak tip width</span><span class="v" id="r_peak">—</span></div>
@@ -247,7 +255,9 @@
     var rv=$("red"); rv.textContent=fmt(rr,2)+"%"; rv.className="val num "+rs;
     var txv=$("tx"), txs=d.tip_excess>0?(d.tip_excess>=4?"crit":"warn"):"ok";
     txv.textContent=d.tip_excess; txv.className="val num "+txs;
-    $("mp").textContent=d.max_parents;
+    var dpu=d.depth_used_pct||0, dps=state(dpu,25,60);
+    var dpv=$("dpu"); dpv.textContent=fmt(dpu,dpu<1?2:1)+"%"; dpv.className="val num "+dps;
+    $("dpusub").textContent="lag "+fmt(d.merge_lat_max)+" / cliff "+fmt(d.merge_depth);
 
     $("bps").textContent=fmt(d.bps,2); $("bc").textContent=fmt(d.block_count)+" blocks";
     var ml=d.merge_lat_max||0, mls=state(ml,30,80);
@@ -260,6 +270,10 @@
     $("r_peak").textContent=fmt(d.peak_tip_width); $("r_maxf").textContent=fmt(d.max_fracture_secs,0)+"s";
     $("r_mlmean").textContent=fmt(d.merge_lat_mean,1)+" rounds";
     $("r_bd").textContent=fmt(d.blue_delta);
+    $("r_mp").textContent=fmt(d.max_parents)+" (cap 16)"; $("r_mdepth").textContent=fmt(d.merge_depth)+" rounds";
+    $("r_conf").textContent=(d.conf_samples?fmt(d.conf_time_mean,2)+"s · D="+d.conf_depth:"gathering…");
+    var cc=$("r_corr"); cc.textContent=(d.conf_samples>=3?fmt(d.conf_corr,2)+" · n="+d.conf_samples:"gathering…");
+    cc.className="v "+(Math.abs(d.conf_corr||0)>0.4&&d.conf_samples>=3?"":"");
     $("r_rb").textContent=fmt(d.reds_window)+" / "+fmt(d.blues_window);
     $("r_fe").textContent=fmt(d.fracture_events);
     $("r_daa").textContent=fmt(d.virtual_daa); $("r_diff").textContent=fmt(d.difficulty,0);
