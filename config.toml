@@ -1,12 +1,14 @@
-# Node RPC (WebSocket for live updates)
-rpc_url = "ws://127.0.0.1:16110"
+# Kaspa node gRPC endpoint, host:port (scheme is added in code).
+rpc_url = "192.168.4.33:16110"
 
-# P2P Settings
-p2p_port = 16110
-p2p_bootstrap_peers = ["127.0.0.1:16110"]
+# Dashboard + JSON API port (open http://<host>:8899/).
+http_port = 8899
 
-# Stitch Parameters
-stitch_reward_sompi = 100000      # 0.001 KAS
-dag_window = 10000
-min_blue_delta = 500
-rate_limit_seconds = 30
+# Poll cadence (ms) and rolling-DAG window (recent blocks kept for metrics + the viz).
+poll_ms = 1000
+dag_window = 240
+
+# Fracture flags: tip width at/above this, OR blue-score spread across tips at/above this.
+# (On a ~10 BPS DAG a few tips is normal; tune per network.)
+fracture_tip_width = 8
+base_min_delta = 500

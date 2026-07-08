@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StitchBot · Kaspa DAG health</title>
+<style>
+  :root{
+    --bg:#0a0e10; --panel:#0f161a; --panel2:#131d22; --edge:#1d2a30;
+    --ink:#dbe6e8; --mut:#78909a; --faint:#3a4a52;
+    --teal:#49eacb; --teal-dim:#2a8f7e; --blue:#3b6ea8;
+    --warn:#ffc857; --crit:#ff5d5d;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 70% -10%,#0e1a1e 0%,var(--bg) 55%);
+    color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;
+    display:flex;flex-direction:column;min-height:100vh}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  a{color:var(--teal)}
+
+  /* top bar */
+  header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--edge);
+    background:linear-gradient(180deg,rgba(73,234,203,.04),transparent)}
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand b{font-size:18px;letter-spacing:.3px}
+  .brand .mark{color:var(--teal);font-size:18px}
+  .brand span{color:var(--mut);font-size:12px}
+  header .spacer{flex:1}
+  .conn{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12.5px;color:var(--mut)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--crit);box-shadow:0 0 10px var(--crit)}
+  .dot.ok{background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .kv{color:var(--mut)} .kv b{color:var(--ink);font-weight:600}
+
+  /* metric strip */
+  .strip{display:grid;grid-template-columns:1.4fr repeat(5,1fr);gap:1px;background:var(--edge);
+    border-bottom:1px solid var(--edge)}
+  .card{background:var(--panel);padding:14px 18px;display:flex;flex-direction:column;gap:6px;min-width:0}
+  .card .lab{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+  .card .val{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:30px;font-weight:600;
+    line-height:1;letter-spacing:-.5px}
+  .card.hero{background:linear-gradient(180deg,var(--panel2),var(--panel))}
+  .card.hero .val{font-size:44px}
+  .card .sub{font-size:11.5px;color:var(--mut);font-family:var(--mono)}
+  .pill{align-self:flex-start;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+    padding:2px 8px;border-radius:999px;border:1px solid;font-weight:600}
+  .pill.ok{color:var(--teal);border-color:var(--teal-dim);background:rgba(73,234,203,.08)}
+  .pill.warn{color:var(--warn);border-color:#7a5f1e;background:rgba(255,200,87,.08)}
+  .pill.crit{color:var(--crit);border-color:#7a2b2b;background:rgba(255,93,93,.1)}
+  .val.ok{color:var(--teal)} .val.warn{color:var(--warn)} .val.crit{color:var(--crit)}
+
+  /* fracture banner */
+  #banner{display:none;padding:9px 22px;background:linear-gradient(90deg,rgba(255,93,93,.16),transparent);
+    border-bottom:1px solid #3a1f22;color:#ffb3b3;font-family:var(--mono);font-size:13px;
+    align-items:center;gap:10px}
+  #banner.show{display:flex}
+  #banner .b{width:8px;height:8px;border-radius:50%;background:var(--crit);animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+  /* main */
+  main{flex:1;display:grid;grid-template-columns:1fr 300px;gap:1px;background:var(--edge);min-height:0}
+  .stage{position:relative;background:var(--bg);overflow:hidden}
+  #dag{display:block;width:100%;height:100%}
+  .overlay{position:absolute;left:16px;top:14px;font-family:var(--mono);font-size:11px;color:var(--mut);
+    pointer-events:none;display:flex;flex-direction:column;gap:3px}
+  .overlay .leg{display:flex;align-items:center;gap:7px}
+  .swatch{width:22px;height:8px;border-radius:2px}
+  .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    color:var(--mut);font-family:var(--mono);font-size:13px}
+
+  aside{background:var(--panel);padding:16px 18px;display:flex;flex-direction:column;gap:18px;overflow:auto}
+  .sec h3{margin:0 0 10px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);font-weight:600}
+  .spark{width:100%;height:64px;display:block}
+  .rows{display:flex;flex-direction:column;gap:7px}
+  .row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12.5px}
+  .row .k{color:var(--mut)} .row .v{color:var(--ink);font-variant-numeric:tabular-nums}
+  footer{padding:8px 22px;border-top:1px solid var(--edge);color:var(--faint);font-size:11px;font-family:var(--mono)}
+  @media(max-width:820px){.strip{grid-template-columns:1fr 1fr 1fr}main{grid-template-columns:1fr}aside{flex-direction:row;flex-wrap:wrap}}
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="mark">◈</span><b>StitchBot</b><span>Kaspa DAG health monitor</span></div>
+    <div class="spacer"></div>
+    <div class="conn">
+      <span class="kv">net <b id="net">—</b></span>
+      <span class="kv">sink <b id="sink" class="num">—</b></span>
+      <span class="kv">age <b id="age" class="num">—</b></span>
+      <span class="dot" id="dot"></span><span id="cstat">connecting…</span>
+    </div>
+  </header>
+
+  <div class="strip">
+    <div class="card hero"><div class="lab">Tip width</div><div class="val" id="tw">—</div>
+      <span class="pill ok" id="twpill">healthy</span></div>
+    <div class="card"><div class="lab">Blocks / sec</div><div class="val num" id="bps">—</div><div class="sub" id="bc"></div></div>
+    <div class="card"><div class="lab">Blue Δ · tips</div><div class="val num" id="bd">—</div><div class="sub" id="brange"></div></div>
+    <div class="card"><div class="lab">Virtual DAA</div><div class="val num" id="daa">—</div><div class="sub" id="hc"></div></div>
+    <div class="card"><div class="lab">Difficulty</div><div class="val num" id="diff">—</div><div class="sub">window <span id="win">—</span></div></div>
+    <div class="card"><div class="lab">Stress Φ</div><div class="val num" id="stress">—</div><div class="sub">peak <span id="speak" class="num">—</span></div></div>
+  </div>
+
+  <div id="banner"><span class="b"></span><span id="bantext"></span></div>
+
+  <main>
+    <div class="stage">
+      <canvas id="dag"></canvas>
+      <div class="overlay">
+        <div class="leg"><span class="swatch" style="background:linear-gradient(90deg,#2b4c7e,#49eacb)"></span> blue score → newer</div>
+        <div class="leg"><span class="swatch" style="background:var(--teal);box-shadow:0 0 8px var(--teal)"></span> current tip</div>
+      </div>
+      <div class="empty" id="empty">connecting to node…</div>
+    </div>
+    <aside>
+      <div class="sec"><h3>Tip width · last 2 min</h3><canvas class="spark" id="sparkTip"></canvas></div>
+      <div class="sec"><h3>Block rate · last 2 min</h3><canvas class="spark" id="sparkBps"></canvas></div>
+      <div class="sec"><h3>Ledger</h3>
+        <div class="rows">
+          <div class="row"><span class="k">block count</span><span class="v" id="r_bc">—</span></div>
+          <div class="row"><span class="k">header count</span><span class="v" id="r_hc">—</span></div>
+          <div class="row"><span class="k">blue max</span><span class="v" id="r_bmax">—</span></div>
+          <div class="row"><span class="k">fracture events</span><span class="v" id="r_fe">—</span></div>
+          <div class="row"><span class="k">nodes in view</span><span class="v" id="r_win">—</span></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+  <footer>Polls a local node over gRPC · metrics are observational, not a consensus signal · testnet/research prototype</footer>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var fmt=function(n,d){return (n==null?0:n).toLocaleString(undefined,{maximumFractionDigits:d==null?0:d})};
+
+  // ---- animated DAG canvas ----
+  var cv=$("dag"), ctx=cv.getContext("2d"), DPR=Math.max(1,window.devicePixelRatio||1);
+  var nodes={};              // id -> {x,y,tx,ty,blue,tip,seen}
+  var lastData=null;
+  function resize(){ var r=cv.parentElement.getBoundingClientRect();
+    cv.width=r.width*DPR; cv.height=r.height*DPR; }
+  window.addEventListener("resize",resize); resize();
+
+  function frac(id){ var h=0; for(var i=0;i<id.length;i++){h=(h*31+id.charCodeAt(i))>>>0;} return (h%1000)/1000; }
+
+  function layout(d){
+    var W=cv.width, H=cv.height, pad=42*DPR;
+    var bmin=d.blue_min||0, bmax=d.blue_max||1;
+    // widen range using node extremes so the river fills the stage
+    var lo=Infinity, hi=-Infinity;
+    d.nodes.forEach(function(n){ if(n.blue<lo)lo=n.blue; if(n.blue>hi)hi=n.blue; });
+    if(!isFinite(lo)){lo=bmin;hi=bmax;} if(hi<=lo)hi=lo+1;
+    var live={};
+    d.nodes.forEach(function(n){
+      var x=pad+(W-2*pad)*((n.blue-lo)/(hi-lo));
+      var y=pad+(H-2*pad)*(0.08+0.84*frac(n.id));
+      var o=nodes[n.id];
+      if(!o){ o={x:x+18*DPR,y:y,tx:x,ty:y,blue:n.blue,tip:n.is_tip,born:performance.now()}; nodes[n.id]=o; }
+      o.tx=x; o.ty=y; o.blue=n.blue; o.tip=n.is_tip; o.parents=n.parents; o.seen=true;
+      live[n.id]=1;
+    });
+    Object.keys(nodes).forEach(function(id){ if(!live[id]) delete nodes[id]; });
+  }
+
+  function blueColor(t){ // t in [0,1] low->high blue score
+    var a=[43,76,126], b=[73,234,203];
+    var r=Math.round(a[0]+(b[0]-a[0])*t), g=Math.round(a[1]+(b[1]-a[1])*t), bl=Math.round(a[2]+(b[2]-a[2])*t);
+    return "rgb("+r+","+g+","+bl+")";
+  }
+
+  function draw(){
+    requestAnimationFrame(draw);
+    var W=cv.width,H=cv.height;
+    ctx.clearRect(0,0,W,H);
+    if(!lastData||!lastData.nodes||!lastData.nodes.length) return;
+    var lo=Infinity,hi=-Infinity;
+    lastData.nodes.forEach(function(n){if(n.blue<lo)lo=n.blue;if(n.blue>hi)hi=n.blue;});
+    if(hi<=lo)hi=lo+1;
+    // ease positions
+    for(var id in nodes){var o=nodes[id]; o.x+=(o.tx-o.x)*0.14; o.y+=(o.ty-o.y)*0.14;}
+    // edges
+    ctx.lineWidth=DPR; ctx.strokeStyle="rgba(120,144,154,0.14)";
+    for(var id in nodes){var o=nodes[id]; if(!o.parents)continue;
+      for(var i=0;i<o.parents.length;i++){var p=nodes[o.parents[i]]; if(!p)continue;
+        ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(o.x,o.y); ctx.stroke();}}
+    // nodes
+    var frac=lastData.fracture;
+    for(var id in nodes){var o=nodes[id];
+      var t=(o.blue-lo)/(hi-lo); if(t<0)t=0; if(t>1)t=1;
+      var r=(o.tip?6:3.4)*DPR;
+      if(o.tip){ ctx.beginPath(); ctx.arc(o.x,o.y,r+5*DPR,0,7);
+        ctx.fillStyle=frac?"rgba(255,93,93,0.16)":"rgba(73,234,203,0.16)"; ctx.fill(); }
+      ctx.beginPath(); ctx.arc(o.x,o.y,r,0,7);
+      ctx.fillStyle=o.tip?(frac?"#ff7a7a":"#7bf5df"):blueColor(t);
+      if(o.tip){ctx.shadowColor=frac?"#ff5d5d":"#49eacb";ctx.shadowBlur=14*DPR;}
+      ctx.fill(); ctx.shadowBlur=0;
+    }
+  }
+  requestAnimationFrame(draw);
+
+  // ---- sparklines ----
+  function spark(cid,arr,color,fill){
+    var c=$(cid),x=c.getContext("2d"),r=c.getBoundingClientRect();
+    c.width=r.width*DPR;c.height=r.height*DPR;var W=c.width,H=c.height,p=4*DPR;
+    x.clearRect(0,0,W,H); if(!arr||!arr.length)return;
+    var mx=Math.max.apply(null,arr),mn=Math.min.apply(null,arr); if(mx<=mn)mx=mn+1;
+    var step=(W-2*p)/Math.max(1,arr.length-1);
+    x.beginPath();
+    arr.forEach(function(v,i){var px=p+i*step,py=H-p-(H-2*p)*((v-mn)/(mx-mn)); i?x.lineTo(px,py):x.moveTo(px,py);});
+    x.strokeStyle=color;x.lineWidth=1.6*DPR;x.lineJoin="round";x.stroke();
+    x.lineTo(p+(arr.length-1)*step,H-p);x.lineTo(p,H-p);x.closePath();
+    x.fillStyle=fill;x.fill();
+    // endpoint dot
+    var lv=arr[arr.length-1],ex=p+(arr.length-1)*step,ey=H-p-(H-2*p)*((lv-mn)/(mx-mn));
+    x.beginPath();x.arc(ex,ey,2.6*DPR,0,7);x.fillStyle=color;x.fill();
+  }
+
+  function state(v,warn,crit){ return v>=crit?"crit":v>=warn?"warn":"ok"; }
+  function setPill(el,s,txt){ el.className="pill "+s; el.textContent=txt; }
+
+  function render(d){
+    lastData=d; layout(d); $("empty").style.display=d.nodes&&d.nodes.length?"none":"flex";
+    if(!d.connected){ $("dot").className="dot"; $("cstat").textContent="node unreachable";
+      $("empty").textContent="node unreachable — is kaspad running with gRPC?"; $("empty").style.display="flex"; return; }
+    $("dot").className="dot ok"; $("cstat").textContent="live";
+    $("net").textContent=d.network||"—";
+    $("sink").textContent=d.sink||"—";
+    $("age").textContent="0s";
+
+    var tw=d.tip_width, s=state(tw,5,8);
+    var twv=$("tw"); twv.textContent=tw; twv.className="val "+s;
+    setPill($("twpill"), s, s==="ok"?"healthy":s==="warn"?"widening":"fractured");
+    $("bps").textContent=fmt(d.bps,2); $("bc").textContent=fmt(d.block_count)+" blocks";
+    $("bd").textContent=fmt(d.blue_delta); $("brange").textContent=fmt(d.blue_min)+" – "+fmt(d.blue_max);
+    $("daa").textContent=fmt(d.virtual_daa); $("hc").textContent=fmt(d.header_count)+" headers";
+    $("diff").textContent=fmt(d.difficulty,0); $("win").textContent=d.window;
+    var ss=state(d.stress, (d.stress_peak||1)*0.5, (d.stress_peak||1)*0.85);
+    var sv=$("stress"); sv.textContent=fmt(d.stress,2); sv.className="val num "+ss;
+    $("speak").textContent=fmt(d.stress_peak,2);
+
+    $("r_bc").textContent=fmt(d.block_count); $("r_hc").textContent=fmt(d.header_count);
+    $("r_bmax").textContent=fmt(d.blue_max); $("r_fe").textContent=fmt(d.fracture_events);
+    $("r_win").textContent=d.window;
+
+    var ban=$("banner");
+    if(d.fracture){ ban.className="show";
+      $("bantext").textContent="FRACTURE — "+tw+" parallel tips, blue spread "+fmt(d.blue_delta)+" · elevated reorg surface"; }
+    else ban.className="";
+
+    spark("sparkTip",d.tip_history,"#49eacb","rgba(73,234,203,0.12)");
+    spark("sparkBps",d.bps_history,"#7aa2d8","rgba(122,162,216,0.12)");
+  }
+
+  var lastMs=0;
+  function tick(){
+    fetch("/api",{cache:"no-store"}).then(function(r){return r.json()}).then(function(d){
+      lastMs=d.updated_ms||Date.now(); render(d);
+    }).catch(function(){ $("dot").className="dot"; $("cstat").textContent="bridge offline"; });
+  }
+  setInterval(tick,1000); tick();
+  setInterval(function(){ if(lastMs){ $("age").textContent=Math.max(0,Math.round((Date.now()-lastMs)/1000))+"s"; } },1000);
+})();
+</script>
+</body>
+</html>

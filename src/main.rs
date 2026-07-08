@@ -1,153 +1,110 @@
-mod config;
-mod dag;
-mod secure_wallet;
-mod p2p_stitch;
-mod adaptive;
+//! StitchBot — a real-time Kaspa DAG-health monitor.
+//!
+//! Polls a node over gRPC (get_block_dag_info + get_blocks), maintains a rolling DAG, computes
+//! tip-width / blue-delta / BPS / a stress index, and serves a live dashboard + JSON API.
 
-use anyhow::Result;
-use kaspa_addresses::Address;
-use std::collections::{HashSet, VecDeque};
-use chrono::Utc;
-use log::info;
-use kaspa_wrpc_client::KaspaRpcClient;  // ← Correct struct from kaspa-wrpc-client
-use kaspa_rpc_core::Notification;  // ← Correct Notification enum
-use kaspa_notify::notifier::Notifier;  // ← Correct notifier from kaspa-notify
-use kaspa_wallet_core::wallet::Wallet;
+mod config;
+mod engine;
+mod http;
+
+use std::sync::Arc;
+use anyhow::{anyhow, Result};
+use tokio::sync::RwLock;
+
+use kaspa_grpc_client::GrpcClient;
+use kaspa_rpc_core::api::rpc::RpcApi;
+use kaspa_rpc_core::RpcHash;
+
+use engine::{BlockNode, Engine, Snapshot};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cfg = config::Config::from_file("config.toml")?;
 
-    let mut wallet = secure_wallet::load_or_create_wallet(&cfg.rpc_url.replace("ws", "http")).await?;
-    let sk = wallet.private_key().clone();  // Assume wallet exposes private key
-
-    let mut rolling_dag = dag::RollingDag::new(cfg.dag_window);
-    let rpc_http_url = cfg.rpc_url.replace("ws", "http");
-    let rpc_http = KaspaRpcClient::new(&rpc_http_url)?;  // ← Correct KaspaRpcClient
-    let tips = rpc_http.get_tip_hashes().await?;  // ← Correct method call
-    for hash in tips.iter().rev().take(cfg.dag_window) {
-        if let Ok(block) = rpc_http.get_block(hash.clone()).await {  // ← Correct method call
-            rolling_dag.add_block(block);
-        }
-    }
-    info!("DAG bootstrapped: {} nodes", rolling_dag.graph.node_count());
-
-    let p2p_adaptor = p2p_stitch::setup_p2p(&cfg).await?;
-    let notifier = Notifier::new(&rpc_http).await?;  // ← Correct Notifier::new(&rpc)
-    let mut block_stream = notifier.start();  // ← Correct start() (returns stream)
-
-    // === ADAPTIVE ENGINE ===
-    let mut adaptive_engine = cfg.adaptive.then(|| adaptive::AdaptiveEngine::new(cfg.clone()));
-
-    // For BPS estimation
-    let mut block_times = VecDeque::with_capacity(100);
-
-    while let Some(notification) = block_stream.recv().await {  // ← Receive from notifier stream
-        if let Notification::BlockAdded(block) = notification {  // ← Match on Notification enum
-            let now = Utc::now().timestamp_millis();
-            block_times.push_back(now);
-            if block_times.len() > 100 {
-                block_times.pop_front();
+    // Shared snapshot the HTTP server reads and the poll loop writes.
+    let state = Arc::new(RwLock::new(Snapshot::default()));
+    {
+        let (st, port) = (state.clone(), cfg.http_port);
+        tokio::spawn(async move {
+            if let Err(e) = http::serve(port, st).await {
+                log::error!("http server: {e}");
             }
-            let bps = if block_times.len() > 1 {
-                let dt = (block_times.back().unwrap() - block_times.front().unwrap()) as f64 / 1000.0;
-                (block_times.len() - 1) as f64 / dt.max(1.0)
-            } else {
-                1.0
-            };
-
-            info!("New block: {} (blue={}) | BPS: {:.1}", block.hash(), block.header.blue_score, bps);
-            rolling_dag.add_block(block.clone());
-
-            // === ORPHAN DETECTION ===
-            let is_orphan = !rolling_dag.is_in_selected_chain(&block);
-            if is_orphan {
-                info!("ORPHAN DETECTED: {}", block.hash());
-            }
-
-            // Update adaptive engine (async!)
-            if let Some(engine) = adaptive_engine.as_mut() {
-                engine.update_block(&block, is_orphan).await?;
-            }
-
-            let now = Utc::now().timestamp();
-
-            if let Some((weak_idx, tips)) = rolling_dag.find_fracture(200) {
-                let weak = &rolling_dag.graph[weak_idx];
-                let tip_hashes: Vec<String> = tips.iter().map(|&i| rolling_dag.graph[i].hash.clone()).collect();
-                let blue_delta = tips.iter()
-                    .map(|&i| rolling_dag.graph[i].blue_score.saturating_sub(weak.blue_score))
-                    .max()
-                    .unwrap_or(0);
-
-                let sus = adaptive_engine.as_ref()
-                    .map(|e| e.sus(blue_delta, bps))
-                    .unwrap_or(1.0);
-
-                let should_stitch = adaptive_engine.as_ref()
-                    .map(|e| e.should_stitch(blue_delta, bps, now))
-                    .unwrap_or(true);
-
-                let reward = adaptive_engine.as_ref()
-                    .map(|e| e.reward(sus))
-                    .unwrap_or(cfg.base_reward_sompi);
-
-                let rate_limit = adaptive_engine.as_ref()
-                    .map(|e| {
-                        let base = cfg.base_rate_limit as f64;
-                        let sus = sus.min(10.0);
-                        (base / (1.0 + sus)) as i64
-                    })
-                    .unwrap_or(30);
-
-                info!(
-                    "Fracture: {} | delta={} | SUS={:.2} | rate={}s | reward={} sompi | stitch={} | orphan_rate={:.3}%",
-                    weak.hash, blue_delta, sus, rate_limit, reward, should_stitch,
-                    adaptive_engine.as_ref().map(|e| e.orphan_rate() * 100.0).unwrap_or(0.0)
-                );
-
-                if should_stitch {
-                    p2p_stitch::broadcast_stitch(&p2p_adaptor, &weak.hash, &tip_hashes, reward, &sk).await?;
-                    info!("ADAPTIVE STITCH → reward={} sompi", reward);
-
-                    let tip_set: HashSet<String> = tip_hashes.into_iter().collect();
-                    let wallet_clone = wallet.clone();
-                    let rpc_clone = rpc_http.clone();
-                    tokio::spawn(async move {
-                        for _ in 0..30 {
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                            if let Ok(new_block) = rpc_clone.get_block(block.hash().clone()).await {  // ← Correct method call
-                                let parents: HashSet<String> = new_block.header.direct_parents.iter().map(|h| h.to_string()).collect();
-                                if tip_set.is_subset(&parents) {
-                                    if let Some(miner_addr) = get_miner_address(&new_block) {
-                                        if let Ok(txid) = send_reward(&wallet_clone, miner_addr, reward).await {
-                                            info!("HEALED! Reward sent: {}", txid);
-                                        }
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    });
-
-                    if let Some(engine) = adaptive_engine.as_mut() {
-                        engine.record_stitch();
-                    }
-                }
-            }
-        }
+        });
     }
 
-    Ok(())
+    let url = format!("grpc://{}", cfg.rpc_url);
+    log::info!("connecting to node at {url} ...");
+    let client = GrpcClient::connect(url.clone()).await.map_err(|e| anyhow!("connect {url}: {e}"))?;
+    log::info!("connected — polling every {} ms; dashboard on :{}", cfg.poll_ms, cfg.http_port);
+
+    let mut eng = Engine::new(cfg.dag_window);
+    let mut low_hash: Option<RpcHash> = None;
+    let mut last_count: Option<(u64, f64)> = None; // (block_count, unix_secs)
+
+    loop {
+        match poll_once(&client, &mut eng, &mut low_hash, &mut last_count, &cfg).await {
+            Ok(snap) => *state.write().await = snap,
+            Err(e) => {
+                log::warn!("poll error: {e}");
+                state.write().await.connected = false;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(cfg.poll_ms)).await;
+    }
 }
 
-fn get_miner_address(block: &kaspa_consensus_core::block::Block) -> Option<Address> {
-    block.transactions.first()?.outputs.first()?.script_public_key.address().ok()
-}
+async fn poll_once(
+    client: &GrpcClient,
+    eng: &mut Engine,
+    low_hash: &mut Option<RpcHash>,
+    last_count: &mut Option<(u64, f64)>,
+    cfg: &config::Config,
+) -> Result<Snapshot> {
+    let info = client.get_block_dag_info().await?;
 
-async fn send_reward(wallet: &Wallet, addr: Address, amount: u64) -> Result<String> {  // ← No generics — Wallet is concrete
-    let mut tx = wallet.create_transaction(&addr, amount).await?;
-    let rpc = kaspa_wrpc_client::KaspaRpcClient::new("http://127.0.0.1:16110")?;  // ← Correct KaspaRpcClient
-    Ok(rpc.submit_transaction(tx.into()).await?)  // ← Correct method call
+    // Pull recent blocks: from the previous sink, or from the current sink on the first pass.
+    let low = low_hash.or(Some(info.sink));
+    let resp = client.get_blocks(low, true, false).await?;
+    for b in &resp.blocks {
+        let parents = b
+            .header
+            .parents_by_level
+            .first()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|h| h.to_string())
+            .collect();
+        eng.ingest(BlockNode {
+            hash: b.header.hash.to_string(),
+            blue_score: b.header.blue_score,
+            daa: b.header.daa_score,
+            timestamp: b.header.timestamp,
+            parents,
+        });
+    }
+    *low_hash = Some(info.sink);
+
+    // BPS from the node's total block-count delta over wall time.
+    let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
+    let bps = match *last_count {
+        Some((pc, pt)) => (info.block_count.saturating_sub(pc)) as f64 / (now - pt).max(0.001),
+        None => 0.0,
+    };
+    *last_count = Some((info.block_count, now));
+
+    let tips: Vec<String> = info.tip_hashes.iter().map(|h| h.to_string()).collect();
+    Ok(eng.snapshot(
+        info.network.to_string(),
+        info.sink.to_string(),
+        info.virtual_daa_score,
+        info.block_count,
+        info.header_count,
+        info.difficulty,
+        bps,
+        &tips,
+        cfg.fracture_tip_width,
+        cfg.base_min_delta,
+    ))
 }

@@ -1,3 +1,32 @@
+# StitchBot — real-time Kaspa DAG-health monitor
+
+**What it is today.** A Rust service that connects to a Kaspa node over gRPC, tracks the recent
+BlockDAG, and serves a live dashboard of DAG health: tip width, block rate, blue-score spread across
+tips, a stress index, and an animated DAG view where blocks flow left→right by blue score and current
+tips glow. Runs against live mainnet or testnet nodes.
+
+```bash
+cargo build --release
+./target/release/stitchbot                                 # uses config.toml
+KASPA_RPC=192.168.4.33:16110 ./target/release/stitchbot    # or point at any node via env
+# then open http://localhost:8899/
+```
+
+`config.toml` controls the node endpoint, dashboard port, poll cadence, DAG window, and fracture
+thresholds. `KASPA_RPC=host:port` overrides the endpoint without editing the file.
+
+**Honesty about scope.** This is the *observability* half of the original StitchBot concept, and it
+works. The *incentive* half described below — a signed p2p side-channel that pays miners to reference
+specific tips — is **not implemented and is not viable as originally specified**: in Kaspa the node,
+not the miner, selects a block's parents (`calc_block_parents`), the parent set already merges all live
+tips up to `max_block_parents`, and a custom p2p message does not traverse the real consensus network.
+The only genuine lever on parent selection is node-side policy. The metrics here are **observational,
+not a consensus signal.** The original design thesis is preserved below for reference.
+
+---
+
+## Original thesis (design notes, not implemented)
+
 StitchBot directly attacks the single biggest practical weakness of high-throughput BlockDAGs like Kaspa: topological fragility under load.
 It does this with an extremely lightweight, incentive-compatible mechanism that is provably effective, economically rational, and future-proof across all known Kaspa consensus upgrades (GHOSTDAG → DAGKnight). The core problem being topological high throughput stress fractures. Security and liveliness in a blockDag are governed by bluescore convergence, under a so-called poisson process. A fracture is two high blue score blocks that are mutually within eachothers anticone (not yet ordered). The probability of deep reorgs grows with time at an exponential rate with the width (the number of parallel high blue scoring tips) and duration of the fracture. [Sompolinsky, Zohar, Wyborsky: “The security threshold degrades gracefully with the degree of parallelism… the higher the honest throughput relative to the adversary, the larger the tolerated parallelism.”] Fractures waste honest work and create SPV deception vectors, which will ultimately impact the so-called normie market, truly a disaster. 
 

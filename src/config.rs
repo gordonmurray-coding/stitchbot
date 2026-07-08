@@ -1,22 +1,46 @@
 use serde::Deserialize;
 
+/// Config for the DAG-health monitor. `#[serde(default)]` fields let an old/minimal
+/// config.toml still load with sensible defaults.
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
+    /// Kaspa node gRPC endpoint, host:port (scheme added in code).
     pub rpc_url: String,
-    pub p2p_port: u16,
-    pub p2p_bootstrap_peers: Vec<String>,
-    pub adaptive: bool,
-    pub base_min_delta: u64,
-    pub base_rate_limit: u64,
-    pub base_reward_sompi: u64,
-    pub max_reward_sompi: u64,
-    pub min_rate_limit: u64,
+    /// Port the dashboard + JSON API are served on.
+    #[serde(default = "default_http_port")]
+    pub http_port: u16,
+    /// How often to poll the node, milliseconds.
+    #[serde(default = "default_poll_ms")]
+    pub poll_ms: u64,
+    /// Number of recent blocks kept in the rolling DAG (for metrics + the viz).
+    #[serde(default = "default_window")]
     pub dag_window: usize,
+    /// Tip-width above this flags a fracture in the UI.
+    #[serde(default = "default_fracture_tips")]
+    pub fracture_tip_width: usize,
+    /// Blue-score spread across tips above this also flags a fracture.
+    #[serde(default = "default_min_delta")]
+    pub base_min_delta: u64,
 }
+
+fn default_http_port() -> u16 { 8899 }
+fn default_poll_ms() -> u64 { 1000 }
+fn default_window() -> usize { 240 }
+fn default_fracture_tips() -> usize { 8 }
+fn default_min_delta() -> u64 { 500 }
 
 impl Config {
     pub fn from_file(path: &str) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&content)?)
+        let mut cfg: Config = toml::from_str(&content)?;
+        // Env override so you can flip nodes without editing config.toml:
+        //   KASPA_RPC=192.168.4.33:16110 ./stitchbot
+        if let Ok(rpc) = std::env::var("KASPA_RPC") {
+            let rpc = rpc.trim();
+            if !rpc.is_empty() {
+                cfg.rpc_url = rpc.to_string();
+            }
+        }
+        Ok(cfg)
     }
 }
