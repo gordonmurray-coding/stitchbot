@@ -35,7 +35,7 @@
   .kv{color:var(--mut)} .kv b{color:var(--ink);font-weight:600}
 
   /* metric strip */
-  .strip{display:grid;grid-template-columns:1.4fr repeat(5,1fr);gap:1px;background:var(--edge);
+  .strip{display:grid;grid-template-columns:1.4fr repeat(6,1fr);gap:1px;background:var(--edge);
     border-bottom:1px solid var(--edge)}
   .card{background:var(--panel);padding:14px 18px;display:flex;flex-direction:column;gap:6px;min-width:0}
   .card .lab{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
@@ -95,11 +95,12 @@
   <div class="strip">
     <div class="card hero"><div class="lab">Tip width</div><div class="val" id="tw">—</div>
       <span class="pill ok" id="twpill">healthy</span></div>
+    <div class="card"><div class="lab">Orphan rate</div><div class="val num" id="red">—</div><div class="sub">reds / merged</div></div>
+    <div class="card"><div class="lab">Tip excess</div><div class="val num" id="tx">—</div><div class="sub">over merge cap</div></div>
+    <div class="card"><div class="lab">Merge cap</div><div class="val num" id="mp">—</div><div class="sub">max parents seen</div></div>
     <div class="card"><div class="lab">Blocks / sec</div><div class="val num" id="bps">—</div><div class="sub" id="bc"></div></div>
     <div class="card"><div class="lab">Blue Δ · tips</div><div class="val num" id="bd">—</div><div class="sub" id="brange"></div></div>
-    <div class="card"><div class="lab">Virtual DAA</div><div class="val num" id="daa">—</div><div class="sub" id="hc"></div></div>
-    <div class="card"><div class="lab">Difficulty</div><div class="val num" id="diff">—</div><div class="sub">window <span id="win">—</span></div></div>
-    <div class="card"><div class="lab">Stress Φ</div><div class="val num" id="stress">—</div><div class="sub">peak <span id="speak" class="num">—</span></div></div>
+    <div class="card"><div class="lab">Fracture</div><div class="val num" id="fdur">—</div><div class="sub" id="fsub">events —</div></div>
   </div>
 
   <div id="banner"><span class="b"></span><span id="bantext"></span></div>
@@ -110,24 +111,30 @@
       <div class="overlay">
         <div class="leg"><span class="swatch" style="background:linear-gradient(90deg,#2b4c7e,#49eacb)"></span> blue score → newer</div>
         <div class="leg"><span class="swatch" style="background:var(--teal);box-shadow:0 0 8px var(--teal)"></span> current tip</div>
+        <div class="leg"><span class="swatch" style="background:#b0454f"></span> red / orphaned work</div>
       </div>
       <div class="empty" id="empty">connecting to node…</div>
     </div>
     <aside>
       <div class="sec"><h3>Tip width · last 2 min</h3><canvas class="spark" id="sparkTip"></canvas></div>
+      <div class="sec"><h3>Orphan rate % · last 2 min</h3><canvas class="spark" id="sparkRed"></canvas></div>
       <div class="sec"><h3>Block rate · last 2 min</h3><canvas class="spark" id="sparkBps"></canvas></div>
       <div class="sec"><h3>Ledger</h3>
         <div class="rows">
-          <div class="row"><span class="k">block count</span><span class="v" id="r_bc">—</span></div>
-          <div class="row"><span class="k">header count</span><span class="v" id="r_hc">—</span></div>
-          <div class="row"><span class="k">blue max</span><span class="v" id="r_bmax">—</span></div>
+          <div class="row"><span class="k">peak tip width</span><span class="v" id="r_peak">—</span></div>
+          <div class="row"><span class="k">max fracture</span><span class="v" id="r_maxf">—</span></div>
+          <div class="row"><span class="k">reds / blues · win</span><span class="v" id="r_rb">—</span></div>
           <div class="row"><span class="k">fracture events</span><span class="v" id="r_fe">—</span></div>
+          <div class="row"><span class="k">virtual DAA</span><span class="v" id="r_daa">—</span></div>
+          <div class="row"><span class="k">difficulty</span><span class="v" id="r_diff">—</span></div>
+          <div class="row"><span class="k">stress Φ · peak</span><span class="v" id="r_stress">—</span></div>
+          <div class="row"><span class="k">block / header</span><span class="v" id="r_bh">—</span></div>
           <div class="row"><span class="k">nodes in view</span><span class="v" id="r_win">—</span></div>
         </div>
       </div>
     </aside>
   </main>
-  <footer>Polls a local node over gRPC · metrics are observational, not a consensus signal · testnet/research prototype</footer>
+  <footer>Polls a node over gRPC · logging metrics to stitchbot_metrics.jsonl · observational, not a consensus signal · research prototype</footer>
 
 <script>
 (function(){
@@ -157,7 +164,7 @@
       var y=pad+(H-2*pad)*(0.08+0.84*frac(n.id));
       var o=nodes[n.id];
       if(!o){ o={x:x+18*DPR,y:y,tx:x,ty:y,blue:n.blue,tip:n.is_tip,born:performance.now()}; nodes[n.id]=o; }
-      o.tx=x; o.ty=y; o.blue=n.blue; o.tip=n.is_tip; o.parents=n.parents; o.seen=true;
+      o.tx=x; o.ty=y; o.blue=n.blue; o.tip=n.is_tip; o.red=n.red; o.parents=n.parents; o.seen=true;
       live[n.id]=1;
     });
     Object.keys(nodes).forEach(function(id){ if(!live[id]) delete nodes[id]; });
@@ -192,7 +199,7 @@
       if(o.tip){ ctx.beginPath(); ctx.arc(o.x,o.y,r+5*DPR,0,7);
         ctx.fillStyle=frac?"rgba(255,93,93,0.16)":"rgba(73,234,203,0.16)"; ctx.fill(); }
       ctx.beginPath(); ctx.arc(o.x,o.y,r,0,7);
-      ctx.fillStyle=o.tip?(frac?"#ff7a7a":"#7bf5df"):blueColor(t);
+      ctx.fillStyle=o.tip?(frac?"#ff7a7a":"#7bf5df"):(o.red?"#b0454f":blueColor(t));
       if(o.tip){ctx.shadowColor=frac?"#ff5d5d":"#49eacb";ctx.shadowBlur=14*DPR;}
       ctx.fill(); ctx.shadowBlur=0;
     }
@@ -231,24 +238,35 @@
     var tw=d.tip_width, s=state(tw,5,8);
     var twv=$("tw"); twv.textContent=tw; twv.className="val "+s;
     setPill($("twpill"), s, s==="ok"?"healthy":s==="warn"?"widening":"fractured");
+
+    // efficiency metrics — the point of the measurement PoC
+    var rr=(d.red_rate||0)*100, rs=state(rr,2,5);
+    var rv=$("red"); rv.textContent=fmt(rr,2)+"%"; rv.className="val num "+rs;
+    var txv=$("tx"), txs=d.tip_excess>0?(d.tip_excess>=4?"crit":"warn"):"ok";
+    txv.textContent=d.tip_excess; txv.className="val num "+txs;
+    $("mp").textContent=d.max_parents;
+
     $("bps").textContent=fmt(d.bps,2); $("bc").textContent=fmt(d.block_count)+" blocks";
     $("bd").textContent=fmt(d.blue_delta); $("brange").textContent=fmt(d.blue_min)+" – "+fmt(d.blue_max);
-    $("daa").textContent=fmt(d.virtual_daa); $("hc").textContent=fmt(d.header_count)+" headers";
-    $("diff").textContent=fmt(d.difficulty,0); $("win").textContent=d.window;
-    var ss=state(d.stress, (d.stress_peak||1)*0.5, (d.stress_peak||1)*0.85);
-    var sv=$("stress"); sv.textContent=fmt(d.stress,2); sv.className="val num "+ss;
-    $("speak").textContent=fmt(d.stress_peak,2);
 
-    $("r_bc").textContent=fmt(d.block_count); $("r_hc").textContent=fmt(d.header_count);
-    $("r_bmax").textContent=fmt(d.blue_max); $("r_fe").textContent=fmt(d.fracture_events);
+    var fv=$("fdur"); fv.textContent=d.fracture?fmt(d.fracture_secs,0)+"s":"—";
+    fv.className="val num "+(d.fracture?"crit":"ok"); $("fsub").textContent="events "+fmt(d.fracture_events);
+
+    $("r_peak").textContent=fmt(d.peak_tip_width); $("r_maxf").textContent=fmt(d.max_fracture_secs,0)+"s";
+    $("r_rb").textContent=fmt(d.reds_window)+" / "+fmt(d.blues_window);
+    $("r_fe").textContent=fmt(d.fracture_events);
+    $("r_daa").textContent=fmt(d.virtual_daa); $("r_diff").textContent=fmt(d.difficulty,0);
+    $("r_stress").textContent=fmt(d.stress,1)+" ("+fmt(d.stress_peak,0)+")";
+    $("r_bh").textContent=fmt(d.block_count)+" / "+fmt(d.header_count);
     $("r_win").textContent=d.window;
 
     var ban=$("banner");
     if(d.fracture){ ban.className="show";
-      $("bantext").textContent="FRACTURE — "+tw+" parallel tips, blue spread "+fmt(d.blue_delta)+" · elevated reorg surface"; }
+      $("bantext").textContent="FRACTURE — "+tw+" tips ("+d.tip_excess+" over cap "+d.max_parents+") for "+fmt(d.fracture_secs,0)+"s · orphan "+fmt(rr,1)+"%"; }
     else ban.className="";
 
     spark("sparkTip",d.tip_history,"#49eacb","rgba(73,234,203,0.12)");
+    spark("sparkRed",d.red_history,"#ff8a6a","rgba(255,138,106,0.12)");
     spark("sparkBps",d.bps_history,"#7aa2d8","rgba(122,162,216,0.12)");
   }
 

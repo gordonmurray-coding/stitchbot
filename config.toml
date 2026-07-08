@@ -12,3 +12,6 @@ dag_window = 240
 # (On a ~10 BPS DAG a few tips is normal; tune per network.)
 fracture_tip_width = 8
 base_min_delta = 500
+
+# Measurement dataset — one JSONL record per poll (tip width, red rate, tip excess, fracture, …).
+log_path = "stitchbot_metrics.jsonl"

@@ -44,13 +44,33 @@ async fn main() -> Result<()> {
 
     loop {
         match poll_once(&client, &mut eng, &mut low_hash, &mut last_count, &cfg).await {
-            Ok(snap) => *state.write().await = snap,
+            Ok(snap) => {
+                log_metrics(&cfg.log_path, &snap);
+                *state.write().await = snap;
+            }
             Err(e) => {
                 log::warn!("poll error: {e}");
                 state.write().await.connected = false;
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(cfg.poll_ms)).await;
+    }
+}
+
+/// Append one compact JSONL record per poll — the measurement dataset (scalars only, no viz nodes).
+fn log_metrics(path: &str, s: &Snapshot) {
+    use std::io::Write;
+    if !s.connected {
+        return;
+    }
+    let rec = serde_json::json!({
+        "t": s.updated_ms, "net": s.network, "tips": s.tip_width, "peak_tips": s.peak_tip_width,
+        "bps": s.bps, "blue_delta": s.blue_delta, "max_parents": s.max_parents, "avg_parents": s.avg_parents,
+        "tip_excess": s.tip_excess, "red_rate": s.red_rate, "reds": s.reds_window, "blues": s.blues_window,
+        "fracture": s.fracture, "fracture_secs": s.fracture_secs, "daa": s.virtual_daa, "blocks": s.block_count,
+    });
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{rec}");
     }
 }
 
@@ -76,12 +96,16 @@ async fn poll_once(
             .iter()
             .map(|h| h.to_string())
             .collect();
+        let vd = b.verbose_data.as_ref();
         eng.ingest(BlockNode {
             hash: b.header.hash.to_string(),
             blue_score: b.header.blue_score,
             daa: b.header.daa_score,
             timestamp: b.header.timestamp,
             parents,
+            is_chain: vd.map(|v| v.is_chain_block).unwrap_or(false),
+            blues: vd.map(|v| v.merge_set_blues_hashes.len() as u32).unwrap_or(0),
+            reds: vd.map(|v| v.merge_set_reds_hashes.len() as u32).unwrap_or(0),
         });
     }
     *low_hash = Some(info.sink);

@@ -21,7 +21,12 @@ pub struct Config {
     /// Blue-score spread across tips above this also flags a fracture.
     #[serde(default = "default_min_delta")]
     pub base_min_delta: u64,
+    /// File the JSONL metrics dataset is appended to (the measurement PoC output).
+    #[serde(default = "default_log_path")]
+    pub log_path: String,
 }
+
+fn default_log_path() -> String { "stitchbot_metrics.jsonl".to_string() }
 
 fn default_http_port() -> u16 { 8899 }
 fn default_poll_ms() -> u64 { 1000 }
